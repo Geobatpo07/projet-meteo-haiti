@@ -1,0 +1,18 @@
+Version: 1.0
+ProjectId: 5d952ff1-7fae-4080-b84f-f35824f0418e
+
+RestoreWorkspace: Default
+SaveWorkspace: Default
+AlwaysSaveHistory: Default
+
+EnableCodeIndexing: Yes
+UseSpacesForTab: Yes
+NumSpacesForTab: 2
+Encoding: UTF-8
+
+RnwWeave: Sweave
+LaTeX: pdfLaTeX
+
+PythonType: conda
+PythonVersion: 3.12.7
+PythonPath: C:/Users/lgeov/anaconda3/python.exe

@@ -1,6 +1,3 @@
-# Charger les clés d'API à partir des variables d'environnement
-api_key <- Sys.getenv("OPENCAGE_API_KEY")
-
 # Vérifier et installer les packages nécessaires
 packages <- c("DBI", "RSQLite", "httr", "jsonlite", "here")
 install_if_missing <- function(pkg) {
@@ -11,92 +8,74 @@ lapply(packages, install_if_missing)
 # Charger les packages
 library(httr)
 library(jsonlite)
+library(DBI)
 library(RSQLite)
 library(here)
 
-# Définir le chemin de la base de données avec 'here'
+# Connexion à la base SQLite
 db_path <- here("data", "meteo_haiti.sqlite")
+conn <- dbConnect(RSQLite::SQLite(), db_path)
 
-# Fonction pour récupérer la ville et son département
-fetch_ville_and_departement <- function(ville) {
-  conn <- dbConnect(RSQLite::SQLite(), db_path)
-  
-  # Récupérer le département de la ville
-  query <- sprintf("SELECT d.nom AS departement 
-                    FROM villes v
-                    JOIN departements d ON v.id_departement = d.id
-                    WHERE v.nom = '%s'", ville)
-  
-  departement <- dbGetQuery(conn, query)
-  dbDisconnect(conn)
-  
-  if (nrow(departement) > 0) {
-    return(departement$departement)
-  } else {
-    return(NA)
-  }
-}
+# Lire les villes existantes
+villes <- dbGetQuery(conn, "SELECT id, nom AS ville, latitude, longitude FROM villes")
 
-# Fonction pour récupérer les coordonnées géographiques via OpenCage Geocoder
-get_coordinates <- function(place_name, api_key) {
-  base_url <- "https://api.opencagedata.com/geocode/v1/json"
-  url <- paste0(base_url, "?q=", URLencode(place_name), "&key=", api_key)
-  response <- GET(url)
-  data <- fromJSON(content(response, "text"))
-  
-  if (length(data$results) > 0) {
-    lat <- data$results[[1]]$geometry$lat
-    lon <- data$results[[1]]$geometry$lng
-    return(c(lat, lon))
-  } else {
-    return(c(NA, NA))  # Si aucune donnée n'est trouvée
-  }
-}
+# Période de collecte
+start_year <- 2010
+end_year <- 2020
 
-# Fonction pour récupérer les données météo depuis l'API Open Meteo
-fetch_meteo_data <- function(ville, lat, lon) {
-  url <- paste0("https://api.open-meteo.com/v1/forecast?latitude=", lat, 
-                "&longitude=", lon, 
-                "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,humidity_2m_mean,windspeed_10m_max&timezone=America%2FPort-au-Prince")
-  
-  # Requête API
-  response <- fromJSON(content(GET(url), "text"))
-  
-  # Vérifier si la réponse contient les données attendues
-  if (!"daily" %in% names(response)) {
-    stop("Les données météo n'ont pas pu être récupérées.")
-  }
-  
-  # Créer un dataframe avec les données récupérées
-  data <- data.frame(
-    ville = ville,
-    departement = fetch_ville_and_departement(ville),  # Associer le département
-    date = as.Date(response$daily$time),
-    temp_max = response$daily$temperature_2m_max,
-    temp_min = response$daily$temperature_2m_min,
-    humidite = response$daily$humidity_2m_mean,
-    vent = response$daily$windspeed_10m_max,
-    precipitations = response$daily$precipitation_sum
+# Fonction pour récupérer les données climatiques (avec vent)
+get_meteo_data <- function(id_ville, lat, lon, year) {
+  url <- paste0(
+    "https://archive-api.open-meteo.com/v1/archive?",
+    "latitude=", lat,
+    "&longitude=", lon,
+    "&start_date=", year, "-01-01",
+    "&end_date=", year, "-12-31",
+    "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,relative_humidity_2m_mean,windspeed_10m_max",
+    "&timezone=auto"
   )
-  
-  return(data)
+
+  response <- try(GET(url), silent = TRUE)
+  if (inherits(response, "try-error") || response$status_code != 200) {
+    warning(paste("Erreur pour la ville ID", id_ville, "année", year))
+    return(NULL)
+  }
+
+  data <- content(response, as = "parsed", simplifyVector = TRUE)
+  if (is.null(data$daily)) return(NULL)
+
+  df <- data.frame(
+    id_ville = id_ville,
+    date = data$daily$time,
+    temp_min = data$daily$temperature_2m_min,
+    temp_max = data$daily$temperature_2m_max,
+    humidite = data$daily$relative_humidity_2m_mean,
+    precipitation = data$daily$precipitation_sum,
+    vent = data$daily$windspeed_10m_max,
+    stringsAsFactors = FALSE
+  )
+
+  return(df)
 }
 
-# Fonction pour obtenir les coordonnées géographiques de chaque ville
-fetch_villes_coordinates <- function(villes, api_key) {
-  coords <- lapply(villes, function(ville) {
-    get_coordinates(ville, api_key)
-  })
-  coords_df <- data.frame(ville = villes, t(do.call(rbind, coords)))
-  colnames(coords_df) <- c("ville", "latitude", "longitude")
-  return(coords_df)
+# Fonction d'insertion principale
+insert_meteo_data <- function(conn, villes, start_year, end_year) {
+  for (i in 1:nrow(villes)) {
+    ville <- villes[i, ]
+    for (year in start_year:end_year) {
+      cat("Traitement :", ville$ville, "-", year, "\n")
+      df <- get_meteo_data(ville$id, ville$latitude, ville$longitude, year)
+      if (!is.null(df)) {
+        dbWriteTable(conn, "meteo", df, append = TRUE, row.names = FALSE)
+      }
+      Sys.sleep(1)  # Pause pour éviter le rate limiting
+    }
+  }
+  cat("\n Données climatiques insérées avec succès dans la table `meteo`\n")
 }
 
-# Exemple d'appel à la fonction fetch_meteo_data
-# Assurez-vous de définir la ville, la latitude et la longitude
-# ville <- "Port-au-Prince"
-# lat <- 18.5944  # Latitude de Port-au-Prince
-# lon <- -72.3074 # Longitude de Port-au-Prince
-
-# meteo_data <- fetch_meteo_data(ville, lat, lon)
-# print(meteo_data)
+# Appel direct si exécution standalone
+if (sys.nframe() == 0) {
+  insert_meteo_data(conn, villes, start_year, end_year)
+  dbDisconnect(conn)
+}

@@ -15,7 +15,7 @@ source(here("R", "plots.R"))
 # Interface utilisateur
 ui <- fluidPage(
   titlePanel("Prévisions Météorologiques"),
-
+  
   sidebarLayout(
     sidebarPanel(
       selectInput("model", "Choisir le modèle de prévision",
@@ -23,7 +23,7 @@ ui <- fluidPage(
       numericInput("n_ahead", "Nombre d'années à prédire", value = 5, min = 1),
       actionButton("forecast_btn", "Générer Prévisions")
     ),
-
+    
     mainPanel(
       plotOutput("forecast_plot"),
       plotOutput("temp_moy_plot"),
@@ -33,31 +33,34 @@ ui <- fluidPage(
 )
 
 # Serveur
-server <- function(input, output) {
-
+server <- function(input, output, session) {
+  
+  # Ouverture unique de la connexion
+  conn <- connect_db()
+  
+  # Déconnexion propre en fin de session
+  session$onSessionEnded(function() {
+    dbDisconnect(conn)
+  })
+  
+  # Prévisions réactives
   observeEvent(input$forecast_btn, {
-    # Connexion à la base de données
-    conn <- connect_db()
-
-    # Afficher les prévisions en fonction du modèle choisi
+    
     output$forecast_plot <- renderPlot({
       if (input$model == "ARIMA") {
         plot_forecast_arima(conn, n.ahead = input$n_ahead)
-      } else if (input$model == "Prophet") {
+      } else {
         plot_forecast_prophet(conn, n.ahead = input$n_ahead)
       }
     })
-
-    # Afficher les autres graphiques
+    
     output$temp_moy_plot <- renderPlot({
       plot_temp_moyenne(conn)
     })
-
+    
     output$precipitation_plot <- renderPlot({
       plot_precipitations(conn)
     })
-
-    dbDisconnect(conn)
   })
 }
 

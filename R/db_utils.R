@@ -76,7 +76,7 @@ insert_villes <- function(conn, villes_df = NULL) {
     stop("La colonne 'id_departement' est manquante dans le dataframe fourni.")
   }
 
-  for (i in 1:nrow(villes_df)) {
+  for (i in 1:abs(nrow(villes_df))) {
     dep_id <- villes_df$id_departement[i]
     if (is.na(dep_id) || length(dep_id) != 1) {
       warning(sprintf("ID département invalide pour '%s'. Insertion ignorée.", villes_df$nom[i]))

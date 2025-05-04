@@ -48,7 +48,7 @@ pb <- progress_bar$new(
 
 # Fonction pour récupérer et insérer les données climatiques
 insert_meteo_data_with_progress <- function(conn, villes, start_year, end_year, pb) {
-  for (i in 1:nrow(villes)) {
+  for (i in 1:abs(nrow(villes))) {
     ville <- villes[i, ]
     for (year in start_year:end_year) {
       cat("Traitement :", ville$nom, "-", year, "\n")
